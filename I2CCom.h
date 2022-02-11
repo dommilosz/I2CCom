@@ -3,6 +3,7 @@
 
 #include "Wire.h"
 #include <Arduino.h>
+#include "UUID.h"
 
 typedef void (*intFunc)(int a);
 typedef void (*intintFunc)(int a, int b);
@@ -20,10 +21,24 @@ typedef void (*intintintFunc)(int a, int b, int l);
 #define _WIRE_BUFFER_SIZE 32
 #endif
 
+#define DEBUG
+
+#ifdef DEBUG
+#define debug(x) Serial.print(x);
+#define debugln(x) Serial.println(x);
+#else
+#define debug(x)
+#define debugln(x)
+#endif
 //Statuses:
 //0 - READY
 //1 - HAVE DATA
 //OTHER - ERROR
+
+#define POOL_START 8
+#define POOL_END__ 126
+#define ADDRESSING_POOL_START 127
+#define ADDRESSING_POOL_END__ 127
 
 struct device
 {
@@ -50,15 +65,24 @@ public:
     uint8_t data[_WIRE_BUFFER_SIZE];
     uint8_t data_length;
     uint8_t waiting_addr;
+    uint8_t uuid0 = 0;
+    long lastPing;
     TwoWire *_wire;
 
-    bool ready()
+    int ready()
     {
-        if (address > 0 && address < 96)
-        {
-            return true;
+        if((millis() - lastPing) > 500){
+            lastPing = millis();
+            begin();
+            return 2;
         }
-        return false;
+        if (address >= POOL_START && address <= POOL_END__)
+        {
+            return 0;
+        }else{
+            return 3;
+        }
+        return 1;
     }
 
     I2CCom_Slave(uint8_t DEV_ID, uint8_t _waiting_addr, TwoWire *wire = &Wire)
@@ -68,10 +92,18 @@ public:
         waiting_addr = _waiting_addr;
     }
 
+    I2CCom_Slave(uint8_t DEV_ID, TwoWire *wire = &Wire)
+    {
+        device_id = DEV_ID;
+        _wire = wire;
+        waiting_addr = 127;
+    }
+
     void begin()
     {
         address = waiting_addr;
         _wire->begin(address);
+        uuid0 = GetTimeByte();
         status = 2;
     }
 
@@ -119,15 +151,20 @@ public:
 
     bool receiveEvent()
     {
+        lastPing = millis();
         data_req = _wire->read();
         if (_wire->available())
         {
             if (data_req == 0xFF)
             {
+                uint8_t id = _wire->read();
                 address = _wire->read();
-                _wire->end();
-                _wire->begin(address);
-                status = 0;
+                if (id == uuid0)
+                {
+                    _wire->end();
+                    _wire->begin(address);
+                    status = 0;
+                }
             }
             else
             {
@@ -149,13 +186,24 @@ public:
                 return true;
             }
         }
-        if (data_req == 0x00)
+        else if (data_req == 0x00)
         {
-            Serial.print("REQ INFO");
             _wire->write(device_id);
             _wire->write(status);
             _wire->write(data_ready);
             _wire->write(data_length);
+        }
+        else if (data_req == 0xFE)
+        {
+            uint8_t arr[32];
+            debug(F("Byte is: "));
+            debugln(uuid0);
+            GenArr(uuid0, arr);
+            for (int i = 0; i < 32; i++)
+            {
+                uint8_t data = arr[i];
+                _wire->write(data);
+            }
         }
         else
         {
@@ -198,6 +246,19 @@ public:
         _wire->endTransmission();
     }
 
+    bool SendDataByID(uint8_t dev_type, uint8_t action_id, int8_t *data, uint8_t length)
+    {
+        for (uint8_t address = POOL_START; address <= POOL_END__; address++)
+        {
+            if (devices[address].device_id == dev_type)
+            {
+                SendData(address, action_id, data, length);
+                return true;
+            }
+        }
+        return false;
+    }
+
     size_t RequestData(uint8_t address, uint8_t action_id, uint8_t length)
     {
         _wire->beginTransmission(address);
@@ -211,32 +272,28 @@ public:
         _wire->beginTransmission(address);
         _wire->write(action_id);
         _wire->endTransmission();
-        _wire->requestFrom(address, length);
-        for (int8_t i = 0; i < 10; i++)
+        while (Wire.available())
         {
-            if (_wire->available())
-            {
-                break;
-            }
-            delay(50);
+            Wire.read();
         }
+        _wire->requestFrom(address, length);
         if (_wire->available() < 1)
         {
-            Serial.print(F("Empty data: "));
-            Serial.print(address);
-            Serial.print("-");
-            Serial.println(action_id);
+            debug(F("Empty data: "));
+            debug(address);
+            debug("-");
+            debug(action_id);
             return 0;
         }
         size_t s = _wire->readBytes((uint8_t *)buff, length);
         if (_wire->available())
         {
-            Serial.print(F("Unused request data: "));
-            Serial.print(_wire->available());
-            Serial.print("-");
-            Serial.print(address);
-            Serial.print("-");
-            Serial.println(action_id);
+            debug(F("Unused request data: "));
+            debug(_wire->available());
+            debug("-");
+            debug(address);
+            debug("-");
+            debug(action_id);
         }
         return s;
     }
@@ -253,6 +310,11 @@ public:
         return info;
     }
 
+    void GetDeviceIDs(uint8_t *buff, uint8_t address)
+    {
+        RequestData((int8_t *)buff, 32, address, 0xFE);
+    }
+
     void Ignore(uint8_t address)
     {
         devices[address].ignore = true;
@@ -261,7 +323,7 @@ public:
     void ScanDevices()
     {
         uint8_t address;
-        for (address = 1; address < 96; address++)
+        for (address = POOL_START; address <= POOL_END__; address++)
         {
             if (CheckDevice(address) == 0)
             {
@@ -297,7 +359,7 @@ public:
                 devices[address].device_id = 255;
             }
         }
-        for (address = 96; address <= 127; address++)
+        for (address = ADDRESSING_POOL_START; address <= ADDRESSING_POOL_END__; address++)
         {
             int8_t unadr_status = CheckDevice(address);
             if (unadr_status == 0)
@@ -326,20 +388,44 @@ public:
     void AssignAddress(uint8_t address)
     {
         //ADDRESS_POOL: <32;126>
-        int8_t data[1];
+        int8_t found_address = 0;
         bool found = false;
-        for (int8_t a = 32; a < 96; a++)
+        for (int8_t a = POOL_START; a <= POOL_END__; a++)
         {
             if (devices[a].device_id == 255)
             {
-                data[0] = a;
+                found_address = a;
                 found = true;
                 break;
             }
         }
         if (found)
         {
-            return SendData(address, 0xFF, data, 1);
+            uint8_t data[32];
+            GetDeviceIDs(data, address);
+            for (int i = 0; i < 32; i++)
+            {
+                for (int i2 = 0; i2 < 8; i2++)
+                {
+                    if (bitRead(data[i], i2) == 0)
+                    {
+                        uint8_t addr[2];
+                        addr[0] = i * 8 + i2;
+                        addr[1] = found_address;
+                        debug(addr[0]);
+                        debug(F(" - gets: "));
+                        debug(addr[1]);
+                        SendData(address, 0xFF, (int8_t *)addr, 2);
+                        for (int t = 0; t < 10; t++)
+                        {
+                            if (CheckDevice(found_address) == 0)
+                                break;
+                            delay(20);
+                        }
+                        return;
+                    }
+                }
+            }
         }
     }
 };
