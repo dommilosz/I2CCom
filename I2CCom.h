@@ -164,7 +164,6 @@ public:
                 if (id == uuid0)
                 {
                     address = _wire->read();
-                    _wire->end();
                     _wire->begin(address);
                     status = 0;
                 }
