@@ -1,8 +1,8 @@
 #ifndef I2CCom_h
 #define I2CCom_h
 
-#include "Wire.h"
 #include <Arduino.h>
+#include "Wire.h"
 #include "UUID.h"
 
 typedef void (*intFunc)(int a);
@@ -21,7 +21,7 @@ typedef void (*intintintFunc)(int a, int b, int l);
 #define _WIRE_BUFFER_SIZE 32
 #endif
 
-#define DEBUG
+//#define DEBUG
 
 #ifdef DEBUG
 #define debug(x) Serial.print(x);
@@ -71,7 +71,8 @@ public:
 
     int ready()
     {
-        if((millis() - lastPing) > 500){
+        if ((millis() - lastPing) > 500)
+        {
             lastPing = millis();
             begin();
             return 2;
@@ -79,7 +80,9 @@ public:
         if (address >= POOL_START && address <= POOL_END__)
         {
             return 0;
-        }else{
+        }
+        else
+        {
             return 3;
         }
         return 1;
@@ -158,9 +161,9 @@ public:
             if (data_req == 0xFF)
             {
                 uint8_t id = _wire->read();
-                address = _wire->read();
                 if (id == uuid0)
                 {
+                    address = _wire->read();
                     _wire->end();
                     _wire->begin(address);
                     status = 0;
@@ -272,9 +275,9 @@ public:
         _wire->beginTransmission(address);
         _wire->write(action_id);
         _wire->endTransmission();
-        while (Wire.available())
+        while (_wire->available())
         {
-            Wire.read();
+            _wire->read();
         }
         _wire->requestFrom(address, length);
         if (_wire->available() < 1)
