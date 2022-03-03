@@ -21,7 +21,7 @@ typedef void (*intintintFunc)(int a, int b, int l);
 #define _WIRE_BUFFER_SIZE 32
 #endif
 
-#define DEBUG
+//#define DEBUG
 
 #ifdef DEBUG
 #define debug(x) Serial.print(x);
@@ -163,11 +163,9 @@ public:
             if (data_req == 0xFF && address == 127)
             {
                 uint8_t id = _wire->read();
-
                 if (id == uuid0)
                 {
                     address = _wire->read();
-                    _wire->end();
                     _wire->begin(address);
                     status = 0;
                 }
