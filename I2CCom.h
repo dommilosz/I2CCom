@@ -1,8 +1,8 @@
 #ifndef I2CCom_h
 #define I2CCom_h
 
-#include "Wire.h"
 #include <Arduino.h>
+#include "Wire.h"
 #include "UUID.h"
 
 typedef void (*intFunc)(int a);
@@ -71,15 +71,19 @@ public:
 
     int ready()
     {
-        if((millis() - lastPing) > 500){
-            lastPing = millis();
+        long diff = (millis() - lastPing);
+        if (diff > 500)
+        {
+            //lastPing = millis();
             begin();
             return 2;
         }
         if (address >= POOL_START && address <= POOL_END__)
         {
             return 0;
-        }else{
+        }
+        else
+        {
             return 3;
         }
         return 1;
@@ -105,6 +109,7 @@ public:
         _wire->begin(address);
         uuid0 = GetTimeByte();
         status = 2;
+        lastPing = millis();
     }
 
     void Interrupt(uint8_t action_id, uint8_t *_data, uint8_t length)
@@ -155,12 +160,13 @@ public:
         data_req = _wire->read();
         if (_wire->available())
         {
-            if (data_req == 0xFF)
+            if (data_req == 0xFF && address == 127)
             {
                 uint8_t id = _wire->read();
-                address = _wire->read();
+
                 if (id == uuid0)
                 {
+                    address = _wire->read();
                     _wire->end();
                     _wire->begin(address);
                     status = 0;
@@ -193,7 +199,7 @@ public:
             _wire->write(data_ready);
             _wire->write(data_length);
         }
-        else if (data_req == 0xFE)
+        else if (data_req == 0xFE && address == 127)
         {
             uint8_t arr[32];
             debug(F("Byte is: "));
@@ -259,10 +265,30 @@ public:
         return false;
     }
 
+    uint8_t GetAddrByID(uint8_t dev_type)
+    {
+        for (uint8_t address = POOL_START; address <= POOL_END__; address++)
+        {
+            if (devices[address].device_id == dev_type)
+            {
+                return address;
+            }
+        }
+        return 0;
+    }
+
     size_t RequestData(uint8_t address, uint8_t action_id, uint8_t length)
     {
         _wire->beginTransmission(address);
         _wire->write(action_id);
+        _wire->endTransmission();
+        return _wire->requestFrom(address, length);
+    }
+
+    size_t SendAndRequestData(int8_t *send_buff,int8_t send_len,uint8_t address, uint8_t action_id, uint8_t length)
+    {
+        _wire->beginTransmission(address);
+        _wire->write((const uint8_t *)send_buff,send_len);
         _wire->endTransmission();
         return _wire->requestFrom(address, length);
     }
@@ -272,9 +298,9 @@ public:
         _wire->beginTransmission(address);
         _wire->write(action_id);
         _wire->endTransmission();
-        while (Wire.available())
+        while (_wire->available())
         {
-            Wire.read();
+            _wire->read();
         }
         _wire->requestFrom(address, length);
         if (_wire->available() < 1)
