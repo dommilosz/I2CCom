@@ -286,6 +286,7 @@ public:
     size_t SendAndRequestData(int8_t *send_buff,int8_t send_len,uint8_t address, uint8_t action_id, uint8_t length)
     {
         _wire->beginTransmission(address);
+		_wire->write(action_id);
         _wire->write((const uint8_t *)send_buff,send_len);
         _wire->endTransmission();
         return _wire->requestFrom(address, length);
